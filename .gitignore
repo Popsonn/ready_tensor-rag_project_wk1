@@ -1,1 +1,17 @@
+# Environment variables (contains API keys)
 .env
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Virtual environment folder
+venv/
+.venv/
+
+# Local ChromaDB persistent storage
+biochem_chroma_db/
+.chroma/ # If Chroma creates a hidden directory
+
+# Logs
+*.log

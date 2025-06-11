@@ -1,0 +1,10 @@
+# In your config.yaml file, under reasoning_strategies:
+reasoning_strategies:
+  CoT: |
+    Think through this systematically by:
+    1. Breaking down the question into key components.
+    2. Identifying relevant information from the context.
+    3. Connecting the biochemical concepts logically.
+    4. Arriving at a precise answer.        
+    
+    Perform this reasoning internally, then provide only your final direct answer in the format specified in the main prompt.
