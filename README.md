@@ -12,9 +12,9 @@ My main goal with this project was to build an intelligent agent that *truly* st
 
 * **Context-Aware Q&A:** Ask questions about Chapter 22, and the system will fetch relevant information to craft its answer.
 * **Strict Grounding:** Designed with extensive prompt engineering to minimize "hallucinations" and ensure answers come directly from the provided text. If the information isn't in Chapter 22, it's trained to tell you exactly that!
-* **Custom Knowledge Base:** Uses **content derived from** a PDF of Lehninger Principles of Biochemistry, Chapter 22, as its sole source of truth. *(Minor edit for accuracy)*
+* **Custom Knowledge Base:** Uses **content derived from** a PDF of Lehninger Principles of Biochemistry, Chapter 22, as its sole source of truth.
 * **Vector Store Integration:** Leverages ChromaDB for efficient semantic search and retrieval.
-* **Powerful LLM:** Powered by the Mistral 7B Instruct v0.2 Large Language Model for generating coherent and precise responses. *(Removed placeholder brackets as you've named it)*
+* **Powerful LLM:** Powered by the Mistral 7B Instruct v0.2 Large Language Model for generating coherent and precise responses.
 * **CoT Reasoning:** Incorporates Chain-of-Thought (CoT) prompting to encourage more systematic internal reasoning by the LLM.
 * **Minimal UI:** A simple Streamlit interface for easy interaction.
 
@@ -23,10 +23,10 @@ My main goal with this project was to build an intelligent agent that *truly* st
 This system is built around a classic RAG architecture:
 
 1.  **Document Loading & Chunking:** The Lehninger Chapter 22 PDF was first converted into structured Markdown files, which were then split into manageable chunks using Markdown-aware and recursive text splitting techniques.
-2.  **Embedding:** Each text chunk is converted into numerical vector embeddings using an embedding model `` `sentence-transformers/all-MiniLM-L6-v2` `` *(Added backticks for code/model name)*
-3.  **Vector Storage:** These embeddings are stored in a [ChromaDB vector store], making them searchable. *(Fixed Markdown link syntax)*
+2.  **Embedding:** Each text chunk is converted into numerical vector embeddings using an embedding model `` `sentence-transformers/all-MiniLM-L6-v2` ``
+3.  **Vector Storage:** These embeddings are stored in a [ChromaDB vector store], making them searchable.
 4.  **Retrieval:** When you ask a question, your query is also embedded, and the system finds the most semantically similar text chunks from the vector store.
-5.  **LLM Generation:** The retrieved chunks, along with your original question and a carefully crafted prompt, are fed to the Mistral 7B Instruct v0.2 LLM. The LLM then synthesizes an answer based *only* on that provided information. *(Removed placeholder brackets)*
+5.  **LLM Generation:** The retrieved chunks, along with your original question and a carefully crafted prompt, are fed to the Mistral 7B Instruct v0.2 LLM. The LLM then synthesizes an answer based *only* on that provided information.
 
 ## 🚀 Getting Started
 
@@ -48,11 +48,17 @@ To run this biochemical assistant, follow these steps:
     * Ensure the pre-processed Markdown files (e.g., 'Biosynthesis of Amino Acids.md' and others, which you created from the Lehninger Chapter 22 PDF) are placed in the **`data/`** directory. These Markdown files are the direct input for the RAG pipeline.
     * **Note:** This system relies on these specific Markdown files. If you plan to provide the original PDF or the script you used to convert it, you might add a separate sub-section or note on how to re-create these Markdown files from the PDF.
 
-4.  **Configure your settings:**
+4.  **Process documents and build vector store:**
+    * This step will load your Markdown files, create embeddings, and build the searchable vector database. You only need to run this once, or whenever your `data/` files change.
+    ```bash
+    python code/data_ingestion.py
+    ```
+
+5.  **Configure your settings:**
     * Open `config.py` to adjust core settings like the LLM model name (`Mistral 7B Instruct v0.2`), the `temperature` (I found `0.0` to be crucial for strict adherence!), chunk sizes, and embedding model.
     * Ensure your `TOGETHER_API_KEY` (or relevant API key for your chosen LLM provider) is set as an environment variable or directly in `config.py` (though environment variables are recommended for security).
     * You can also fine-tune the reasoning strategies in `config.yaml`.
-5.  **Run the application:**
+6.  **Run the application:**
     ```bash
     streamlit run code/app.py
     ```
@@ -81,4 +87,4 @@ While there are still minor artifacts (like a stray `? Answer:` or an occasional
 
 * My instructor for this project and the valuable insights provided throughout this learning experience.
 * The creators of Lehninger Principles of Biochemistry, Chapter 22, for the foundational knowledge!
-* **[Optional: If you used any specific online resources, tutorials, or even "My ever-patient AI assistant for debugging prompt nightmares" 😉]** *(This placeholder is still here for you to decide!)*
+* **[Optional: If you used any specific online resources, tutorials, or even "My ever-patient AI assistant for debugging prompt nightmares" 😉]**
