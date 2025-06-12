@@ -1,172 +1,231 @@
 #!/usr/bin/env python3
 
+import logging
+import os
+import sys
+import json 
+from pathlib import Path
+from typing import Dict, Optional, List, Any
+
 from rag_components import (
     LehningerDocumentSplitter,
     get_langchain_huggingface_embeddings,
     get_langchain_chroma_vector_store
 )
-import os
-from pathlib import Path
-import sys
-import json 
 import config 
 
-def ingest_data_into_vectordb(
-    clear_existing: bool = False
-):
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Chapter metadata configuration - could be moved to config file if needed
+CHAPTER_METADATA_MAP = {
+    "Introduction.md": {
+        "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
+        "chapter_number": "22",
+        "section_root": "22.0 Introduction" 
+    },
+    "Overview of Nitrogen Metabolism.md": {
+        "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
+        "chapter_number": "22",
+        "section_root": "22.1 Overview of Nitrogen Metabolism" 
+    },
+    "Biosynthesis of Amino Acids.md": {
+        "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
+        "chapter_number": "22",
+        "section_root": "22.2 Biosynthesis of Amino Acids"
+    },
+    "Molecules Derived from Amino Acids.md": {
+        "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
+        "chapter_number": "22",
+        "section_root": "22.3 Molecules Derived from Amino Acids"
+    },
+    "Biosynthesis and Degradation of Nucleotides.md": {
+        "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
+        "chapter_number": "22",
+        "section_root": "22.4 Biosynthesis and Degradation of Nucleotides"
+    }
+}
+
+
+def _enrich_documents_with_metadata(document_splits: List, chapter_metadata_map: Dict[str, Dict]) -> List:
     """
-    Complete data ingestion pipeline - processes markdown files directly into vector database.
-    Configuration is loaded from the central ConfigManager.
+    Enrich document splits with chapter metadata.
     
     Args:
-        clear_existing (bool): Whether to clear existing collection. If False, will prompt user.
+        document_splits: List of document splits
+        chapter_metadata_map: Mapping of filenames to metadata
     
     Returns:
-        dict: Summary of the ingestion process, or None if aborted/failed.
+        List of enriched document splits
     """
+    logger.info("Enriching documents with chapter metadata")
+    enriched_splits = []
     
-    rag_config = config.get_config()
-    embedding_config = rag_config.vector_store 
-    vector_store_config = rag_config.vector_store
-    document_config = rag_config.document
-    llm_config = config.get_llm_config() 
+    for doc in document_splits:
+        file_name = doc.metadata.get('source_file')
+        if file_name and file_name in chapter_metadata_map:
+            doc.metadata.update(chapter_metadata_map[file_name])
+            logger.debug(f"Added metadata for {file_name}")
+        else:
+            doc.metadata.update({
+                'chapter_number': "N/A",
+                'chapter_title': "N/A"
+            })
+            if file_name:
+                logger.warning(f"No metadata mapping found for file: {file_name}")
+        
+        enriched_splits.append(doc)
+    
+    logger.info(f"Enriched {len(enriched_splits)} documents with metadata")
+    return enriched_splits
 
-    print("=" * 60)
-    print("🚀 STARTING DATA INGESTION FOR BIOCHEMISTRY DOCUMENTS")
-    print("=" * 60)
+
+def _log_processing_summary(summary: Dict[str, Any]) -> None:
+    """Log document processing summary."""
+    logger.info("Document Processing Summary:")
+    logger.info(f"  Total chunks: {summary['total_chunks']}")
+    logger.info(f"  Total content: {summary['size_stats']['total']:,} characters")
+    logger.info(f"  Average chunk size: {summary['size_stats']['avg']} characters")
+    logger.info(f"  Size range: {summary['size_stats']['min']}-{summary['size_stats']['max']} chars")
+    
+    logger.info("Files processed:")
+    for filename, count in summary['files'].items():
+        logger.info(f"  • {filename}: {count} chunks")
+    
+    logger.info("Sections found:")
+    for section, count in summary['sections'].items():
+        logger.info(f"  • {section}: {count} chunks")
+
+
+def _prompt_user_for_clear_confirmation(vector_store_config) -> bool:
+    """
+    Prompt user for confirmation to clear existing database.
+    
+    Returns:
+        bool: True if user confirms, False otherwise
+    """
+    db_path_obj = Path(vector_store_config.persist_directory)
+    if db_path_obj.exists() and any(db_path_obj.iterdir()):
+        logger.warning(f"Vector database at '{vector_store_config.persist_directory}' already exists and contains data")
+        try:
+            response = input("Clear existing documents and rebuild the database? (y/n): ").lower().strip()
+            if response == 'y':
+                logger.info("User confirmed to clear existing data")
+                return True
+            else:
+                logger.info("User chose to keep existing data - aborting ingestion")
+                return False
+        except (EOFError, KeyboardInterrupt):
+            logger.info("User interrupted prompt - aborting ingestion")
+            return False
+    return False
+
+
+def ingest_data_into_vectordb(clear_existing: bool = False) -> Optional[Dict[str, Any]]:
+    """
+    Complete data ingestion pipeline - processes markdown files into vector database.
+    
+    Args:
+        clear_existing (bool): Whether to clear existing collection without prompting
+    
+    Returns:
+        dict: Summary of the ingestion process, or None if failed/aborted
+    """
+    logger.info("=" * 60)
+    logger.info("🚀 STARTING DATA INGESTION FOR BIOCHEMISTRY DOCUMENTS")
+    logger.info("=" * 60)
     
     try:
+        # Load configuration
+        rag_config = config.get_config()
+        embedding_config = rag_config.vector_store 
+        vector_store_config = rag_config.vector_store
+        document_config = rag_config.document
+        
         # Step 1: Initialize Document Splitter
-        print("\n📄 STEP 1: Initializing Document Splitter...")
+        logger.info("📄 STEP 1: Initializing Document Splitter")
         splitter = LehningerDocumentSplitter(
             max_chunk_size=document_config.max_chunk_size,
             chunk_overlap=document_config.chunk_overlap
         )
-        print(f"✅ Configured for chunks: {document_config.max_chunk_size} chars, overlap: {document_config.chunk_overlap}")
+        logger.info(f"Configured for chunks: {document_config.max_chunk_size} chars, overlap: {document_config.chunk_overlap}")
         
-        # --- Define Chapter Configuration Map ---
-        chapter_metadata_map = {
-            "Introduction.md": {
-                "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
-                "chapter_number": "22",
-                "section_root": "22.0 Introduction" 
-            },
-            "Overview of Nitrogen Metabolism.md": {
-                "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
-                "chapter_number": "22",
-                "section_root": "22.1 Overview of Nitrogen Metabolism" 
-            },
-            "Biosynthesis of Amino Acids.md": {
-                "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
-                "chapter_number": "22",
-                "section_root": "22.2 Biosynthesis of Amino Acids"
-            },
-            "Molecules Derived from Amino Acids.md": {
-                "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
-                "chapter_number": "22",
-                "section_root": "22.3 Molecules Derived from Amino Acids"
-            },
-            "Biosynthesis and Degradation of Nucleotides.md": {
-                "chapter_title": "Biosynthesis of Amino Acids, Nucleotides, and Related Molecules",
-                "chapter_number": "22",
-                "section_root": "22.4 Biosynthesis and Degradation of Nucleotides"
-            }
-        }
-
         # Step 2: Process Documents
-        print(f"\n📂 STEP 2: Processing Documents from '{document_config.data_directory}'...")
+        logger.info(f"📂 STEP 2: Processing Documents from '{document_config.data_directory}'")
         
-        # Check if directory exists
         if not Path(document_config.data_directory).exists():
             raise FileNotFoundError(f"Directory not found: {document_config.data_directory}")
         
-        # --- Pass chapter_config to process_directory ---
-        document_splits = splitter.process_directory(
-            document_config.data_directory,
-        )
+        document_splits = splitter.process_directory(document_config.data_directory)
         
         if not document_splits:
-            raise ValueError(f"No documents were processed successfully from {document_config.data_directory}. "
-                             "Please ensure .md files are present and readable.")
-        # --- Enrich Document Splits with Chapter Metadata ---
-        print("\n✨ STEP 2.5: Enriching documents with chapter metadata...")
-        enriched_document_splits = []
-        for doc in document_splits:
-            file_name = doc.metadata.get('source_file')
-            if file_name and file_name in chapter_metadata_map:
-                doc.metadata['chapter_number'] = chapter_metadata_map[file_name]['chapter_number']
-                doc.metadata['chapter_title'] = chapter_metadata_map[file_name]['chapter_title']
-            else:
-                doc.metadata['chapter_number'] = "N/A"
-                doc.metadata['chapter_title'] = "N/A"
-            enriched_document_splits.append(doc)
+            raise ValueError(f"No documents were processed from {document_config.data_directory}. "
+                           "Ensure .md files are present and readable.")
         
-        # Overwrite document_splits with the enriched list
-        document_splits = enriched_document_splits
-        print(f"✅ Documents enriched with chapter metadata. First 5 docs now have metadata like: {document_splits[0].metadata}")
+        # Step 2.5: Enrich documents with metadata
+        logger.info("✨ STEP 2.5: Enriching documents with chapter metadata")
+        document_splits = _enrich_documents_with_metadata(document_splits, CHAPTER_METADATA_MAP)
         
-        # Get processing summary
+        # Log processing summary
         summary = splitter.get_chunks_summary(document_splits)
+        _log_processing_summary(summary)
         
-        print(f"\n📊 Document Processing Summary:")
-        print(f"   Total chunks: {summary['total_chunks']}")
-        print(f"   Total content: {summary['size_stats']['total']:,} characters")
-        print(f"   Average chunk size: {summary['size_stats']['avg']} characters")
-        print(f"   Size range: {summary['size_stats']['min']}-{summary['size_stats']['max']} chars")
+        # Step 3: Initialize Embedding Function
+        logger.info("🧠 STEP 3: Loading Embedding Model")
+        try:
+            embedding_function = get_langchain_huggingface_embeddings(
+                model_name=embedding_config.embedding_model_name, 
+                device=embedding_config.embedding_model_device
+            )
+            
+            embedding_dim = embedding_function.client.get_sentence_embedding_dimension()
+            device = embedding_function.client.device
+            
+            logger.info(f"Embedding function loaded: {embedding_config.embedding_model_name}")
+            logger.info(f"  Embedding dimension: {embedding_dim}")
+            logger.info(f"  Device: {device}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            raise
         
-        print(f"\n📑 Files processed:")
-        for filename, count in summary['files'].items():
-            print(f"   • {filename}: {count} chunks")
+        # Step 4: Handle database clearing
+        logger.info("🗃️  STEP 4: Setting up ChromaDB Vector Database")
         
-        print(f"\n🏷️ Sections found:")
-        for section, count in summary['sections'].items():
-            print(f"   • {section}: {count} chunks")
-        
-        # Step 3: Initialize LangChain Embedding Function
-        print(f"\n🧠 STEP 3: Loading LangChain Embedding Model...")
-        embedding_function = get_langchain_huggingface_embeddings(
-            model_name=embedding_config.embedding_model_name, 
-            device=embedding_config.embedding_model_device
-        )
-        print(f"✅ LangChain Embedding function loaded: {embedding_config.embedding_model_name}")
-        print(f"   Embedding dimension (approx): {embedding_function.client.get_sentence_embedding_dimension()}")
-        print(f"   Device: {embedding_function.client.device}")
-        
-        # Step 4: Initialize LangChain Vector Store
-        print(f"\n🗃️  STEP 4: Setting up LangChain ChromaDB Vector Database...")
-        
-        # Handle clearing existing data with user prompt if clear_existing is False
         perform_clear = clear_existing
         if not clear_existing:
-            db_path_obj = Path(vector_store_config.persist_directory)
-            if db_path_obj.exists() and any(db_path_obj.iterdir()):
-                print(f"⚠️  Vector database at '{vector_store_config.persist_directory}' already exists and contains data.")
-                response = input("Clear existing documents and rebuild the database? (y/n): ").lower().strip()
-                if response == 'y':
-                    perform_clear = True
-                    print("🧹 User confirmed to clear existing data.")
-                else:
-                    print("❌ Aborted data ingestion - keeping existing documents.")
-                    return None
+            perform_clear = _prompt_user_for_clear_confirmation(vector_store_config)
+            if not perform_clear and Path(vector_store_config.persist_directory).exists():
+                logger.info("Aborted - keeping existing documents")
+                return None
         
-        vector_store = get_langchain_chroma_vector_store(
-            embedding_function=embedding_function,
-            persist_directory=vector_store_config.persist_directory,
-            collection_name=vector_store_config.collection_name,
-            reset_db=perform_clear
-        )
+        # Initialize vector store
+        try:
+            vector_store = get_langchain_chroma_vector_store(
+                embedding_function=embedding_function,
+                persist_directory=vector_store_config.persist_directory,
+                collection_name=vector_store_config.collection_name,
+                reset_db=perform_clear
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize vector store: {e}")
+            raise
         
-        # Step 5: Add Documents to Vector Database
-        print(f"\n💾 STEP 5: Adding Documents to LangChain ChromaDB...")
-        vector_store.add_documents(enriched_document_splits)
+        # Step 5: Add documents to vector database
+        logger.info("💾 STEP 5: Adding Documents to ChromaDB")
+        try:
+            vector_store.add_documents(document_splits)
+            final_count = vector_store._collection.count()
+            logger.info(f"Successfully stored {final_count} documents in ChromaDB")
+        except Exception as e:
+            logger.error(f"Failed to add documents to vector store: {e}")
+            raise
         
-        final_count = vector_store._collection.count()
-        print(f"✅ Successfully stored {final_count} documents in LangChain ChromaDB.")
-        
-        # Step 6: Final Summary
-        print("\n" + "=" * 60)
-        print("🎉 DATA INGESTION COMPLETE!")
-        print("=" * 60)
+        # Step 6: Create and log final summary
+        logger.info("=" * 60)
+        logger.info("🎉 DATA INGESTION COMPLETE!")
+        logger.info("=" * 60)
         
         config_summary = {
             "status": "success",
@@ -178,8 +237,8 @@ def ingest_data_into_vectordb(
             },
             "embeddings": {
                 "model": embedding_config.embedding_model_name,
-                "dimension_approx": embedding_function.client.get_sentence_embedding_dimension(),
-                "device": embedding_function.client.device,
+                "dimension": embedding_dim,
+                "device": str(device),
                 "count": final_count
             },
             "vector_store": {
@@ -194,46 +253,41 @@ def ingest_data_into_vectordb(
             }
         }
         
-        print(f"📊 Configuration Summary:")
-        # Using json.dumps for a cleaner, more readable config output
-        print(json.dumps(config_summary['configuration'], indent=2))
-        print(f"\n✅ Your vector database is ready!")
-        print(f"   • Vector database persisted at: {vector_store_config.persist_directory}")
-        print(f"   • Next, use 'rag_pipeline.py' to build your full RAG chain and 'main.py' to query it.")
+        logger.info("Configuration Summary:")
+        logger.info(json.dumps(config_summary['configuration'], indent=2))
+        logger.info(f"Vector database persisted at: {vector_store_config.persist_directory}")
+        logger.info("Next: use 'rag_pipeline.py' to build your RAG chain and 'app.py' to query it")
         
         return config_summary
         
     except FileNotFoundError as e:
-        print(f"❌ Error: {e}")
-        print(f"Make sure your data directory '{document_config.data_directory}' exists and contains .md files.")
+        logger.error(f"Directory error: {e}")
+        logger.error(f"Ensure '{config.get_config().document.data_directory}' exists and contains .md files")
         return None
         
     except ValueError as e:
-        print(f"❌ Data processing error: {e}")
+        logger.error(f"Data processing error: {e}")
         return None
-
+        
     except Exception as e:
-        print(f"❌ Unexpected error during data ingestion: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Unexpected error during data ingestion: {e}", exc_info=True)
         return None
 
 
-def main():
-    """Main function to trigger data ingestion using global config."""
-    print("Preparing to ingest data for Lehninger Biochemistry textbook...")
+def main() -> bool:
+    """Main function to trigger data ingestion."""
+    logger.info("Preparing to ingest data for Lehninger Biochemistry textbook")
     
     rag_config = config.get_config()
-    
-    print(f"Looking for markdown files in: {rag_config.document.data_directory}")
+    logger.info(f"Looking for markdown files in: {rag_config.document.data_directory}")
     
     result = ingest_data_into_vectordb(clear_existing=False) 
     
     if result:
-        print(f"\n🎯 Data ingestion successful!")
+        logger.info("🎯 Data ingestion successful!")
         return True
     else:
-        print(f"\n❌ Data ingestion failed or was aborted. Check the errors above.")
+        logger.error("❌ Data ingestion failed or was aborted")
         return False
 
 
@@ -241,7 +295,7 @@ if __name__ == "__main__":
     success = main()
     
     if not success:
-        print("\n💡 Troubleshooting tips:")
-        print(f"   • Make sure '{config.get_config().document.data_directory}' directory exists and contains .md files")
-        print("   • Ensure you have installed: langchain, chromadb, sentence-transformers, pyyaml")
+        logger.info("💡 Troubleshooting tips:")
+        logger.info(f"  • Ensure '{config.get_config().document.data_directory}' directory exists with .md files")
+        logger.info("  • Check installed packages: langchain, chromadb, sentence-transformers, pyyaml")
         sys.exit(1)
