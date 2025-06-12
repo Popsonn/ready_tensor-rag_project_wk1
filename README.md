@@ -27,6 +27,7 @@ This system is built around a classic RAG architecture:
 3.  **Vector Storage:** These embeddings are stored in a [ChromaDB vector store], making them searchable.
 4.  **Retrieval:** When you ask a question, your query is also embedded, and the system finds the most semantically similar text chunks from the vector store.
 5.  **LLM Generation:** The retrieved chunks, along with your original question and a carefully crafted prompt, are fed to the Mistral 7B Instruct v0.2 LLM. The LLM then synthesizes an answer based *only* on that provided information.
+5.  **LLM Generation:** The retrieved chunks, along with your original question and a carefully crafted prompt, are fed to the Mistral 7B Instruct v0.2 LLM. The LLM then synthesizes an answer based *only* on that provided information.
 
 ## 🚀 Getting Started
 
@@ -34,6 +35,8 @@ To run this biochemical assistant, follow these steps:
 
 1.  **Clone the repository:**
     ```bash
+    git clone [https://github.com/Popsonn/ready_tensor-rag_project_wk1.git](https://github.com/Popsonn/ready_tensor-rag_project_wk1.git)
+    cd ready_tensor-rag_project_wk1
     git clone [https://github.com/Popsonn/ready_tensor-rag_project_wk1.git](https://github.com/Popsonn/ready_tensor-rag_project_wk1.git)
     cd ready_tensor-rag_project_wk1
     ```
@@ -61,6 +64,7 @@ To run this biochemical assistant, follow these steps:
 
 6.  **Run the application:**
     ```bash
+    streamlit run code/app.py
     streamlit run code/app.py
     ```
     Your browser should automatically open the application!
