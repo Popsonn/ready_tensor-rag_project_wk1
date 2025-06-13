@@ -1,4 +1,4 @@
-together-ai
+together
 langchain>=0.3,<0.4
 langchain-core>=0.3,<0.4
 langchain-community>=0.3,<0.4
