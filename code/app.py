@@ -1,116 +1,254 @@
+import logging
 import streamlit as st
-import sys
-import os
-from pathlib import Path
+from typing import Optional, Dict, Any
+
 from rag_pipeline import BiochemistryRAGPipeline
-from data_ingestion import ingest_data_into_vectordb
 import config
 
-# --- Streamlit Page Configuration ---
-st.set_page_config(
-    page_title="Biochemistry RAG System",
-    page_icon="🧬",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# --- Initialize RAG Pipeline in Session State ---
-@st.cache_resource 
-def get_rag_pipeline():
-    """Initializes and returns the BiochemistryRAGPipeline."""
-    try:
-        pipeline = BiochemistryRAGPipeline()
-        return pipeline
-    except ValueError as e:
-        st.error(f"Error initializing RAG pipeline: {e}")
-        st.info("Please ensure your vector database is populated and API key is set correctly.")
-        st.session_state.pipeline_ready = False
-        return None
-    except Exception as e:
-        st.error(f"An unexpected error occurred during RAG pipeline initialization: {e}")
-        st.session_state.pipeline_ready = False
-        return None
+# Constants
+APP_TITLE = "🧬 Biochemistry RAG System"
+APP_DESCRIPTION = "Ask questions about Lehninger Principles of Biochemistry, Chapter 22-Biosynthesis of Amino Acids, Nucleotides, and Related Molecules!"
 
-# --- Data Ingestion Function for Streamlit ---
-def run_data_ingestion(clear_existing: bool = False):
+
+class BiochemistryRAGApp:
     """
-    Triggers the data ingestion process and updates Streamlit status.
-    """
-    st.info("Starting data ingestion...")
-    with st.spinner("Processing documents and building vector database... This may take a few minutes."):
-        ingestion_success = ingest_data_into_vectordb(clear_existing=clear_existing)
-        if ingestion_success:
-            st.success("🎉 Data Ingestion Complete! Vector database is ready.")
-            st.session_state.rag_pipeline = get_rag_pipeline()
-            if st.session_state.rag_pipeline:
-                st.session_state.pipeline_ready = True
-        else:
-            st.error("❌ Data Ingestion Failed or Aborted. Check console for details.")
-            st.session_state.pipeline_ready = False
-
-# --- Main Streamlit App Layout ---
-
-st.title("🧬 Biochemistry RAG System")
-st.markdown("Ask questions about Lehninger Principles of Biochemistry, Chapter 22-Biosynthesis of Amino Acids, Nucleotides, and Related Molecules!")
-
-# --- Sidebar for Configuration and Ingestion ---
-with st.sidebar:
-    st.header("Configuration & Data Management")
+    Streamlit application for the Biochemistry RAG System.
     
-    rag_config = config.get_config()
-    document_config = rag_config.document
-    vector_store_config = rag_config.vector_store
+    Provides a user interface for querying biochemistry knowledge
+    using a RAG (Retrieval-Augmented Generation) pipeline.
+    """
+    
+    def __init__(self):
+        """Initialize the Streamlit app with configuration."""
+        self._configure_page()
+        self._initialize_session_state()
+        
+    def _configure_page(self) -> None:
+        """Configure Streamlit page settings."""
+        st.set_page_config(
+            page_title="Biochemistry RAG System",
+            page_icon="🧬",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
+        
+    def _initialize_session_state(self) -> None:
+        """Initialize session state variables."""
+        if 'pipeline_ready' not in st.session_state:
+            st.session_state.pipeline_ready = False
+        if 'rag_pipeline' not in st.session_state:
+            st.session_state.rag_pipeline = None
+            
+    @st.cache_resource 
+    def get_rag_pipeline(_self) -> Optional[BiochemistryRAGPipeline]:
+        """
+        Initialize and return the BiochemistryRAGPipeline.
+        
+        Returns:
+            Optional[BiochemistryRAGPipeline]: Pipeline instance or None if initialization fails
+        """
+        try:
+            logger.info("Initializing RAG pipeline...")
+            pipeline = BiochemistryRAGPipeline()
+            logger.info("RAG pipeline initialized successfully")
+            return pipeline
+            
+        except ValueError as e:
+            logger.error(f"Configuration error during pipeline initialization: {e}")
+            st.error(f"Configuration Error: {e}")
+            st.info("💡 Please ensure your vector database is populated and API key is set correctly.")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Unexpected error during pipeline initialization: {e}")
+            st.error(f"Initialization Error: {e}")
+            st.info("💡 Please check your configuration and try again.")
+            return None
 
-    st.subheader("Data Directory")
-    st.code(f"Path: {document_config.data_directory}")
-    st.code(f"Chunk Size: {document_config.max_chunk_size}, Overlap: {document_config.chunk_overlap}")
-
-    st.subheader("Vector Database")
-    st.code(f"Path: {vector_store_config.persist_directory}")
-    st.code(f"Collection: {vector_store_config.collection_name}")
-
-# --- Initialize or Retrieve RAG Pipeline ---
-if 'rag_pipeline' not in st.session_state or st.session_state.rag_pipeline is None:
-    with st.spinner("Loading RAG pipeline..."):
-        st.session_state.rag_pipeline = get_rag_pipeline()
-        if st.session_state.rag_pipeline:
-            st.session_state.pipeline_ready = True
-        else:
-            st.session_state.pipeline_ready = False 
-
-# --- Main Query Interface ---
-if st.session_state.get('pipeline_ready', False):
-    st.header("Ask a Question")
-    user_query = st.text_area("Enter your question about Biosynthesis of Amino Acids, Nucleotides, and Related Molecules:", height=100, key="query_input")
-
-    if st.button("Get Answer", type="primary"):
-        if user_query:
-            with st.spinner("Thinking..."):
-                try:
-                    pipeline_instance = st.session_state.rag_pipeline
-                    results = pipeline_instance.query(user_query)
-                    
-                    st.subheader("🤖 Answer:")
-                    st.write(results.get('result', "I apologize, I couldn't find a relevant answer in the provided context."))
-                    
-                    source_documents = results.get('source_documents', [])
-                    if source_documents:
-                        st.subheader("📄 Sources:")
-                        for i, doc in enumerate(source_documents):
-                            with st.expander(f"Source Document {i+1} (File: {doc.metadata.get('source_file', 'N/A')}, Section: {doc.metadata.get('Section', 'N/A')}):"):
-                                st.code(doc.page_content)
-                                st.caption(f"Source File: {doc.metadata.get('source_file', 'N/A')}, Section: {doc.metadata.get('Section', 'N/A')}")
-                    else:
-                        st.info("No specific sources were retrieved for this query.")
+    def render_sidebar(self) -> None:
+        """Render the sidebar with configuration information."""
+        with st.sidebar:
+            st.header("⚙️ System Configuration")
+            
+            try:
+                rag_config = config.get_config()
+                document_config = rag_config.document
+                vector_store_config = rag_config.vector_store
                 
-                except Exception as e:
-                    st.error(f"An error occurred while processing your query: {e}")
-                    st.warning("Please check your LLM API key and ensure the vector database is properly initialized.")
-        else:
-            st.warning("Please enter a question to get an answer.")
-else:
-    st.warning("RAG pipeline is not ready. Please check configuration/API key and run data ingestion if needed.")
+                # Data directory info
+                st.subheader("📁 Data Directory")
+                st.code(f"Path: {document_config.data_directory}")
+                st.code(f"Chunk Size: {document_config.max_chunk_size}")
+                st.code(f"Overlap: {document_config.chunk_overlap}")
 
-# --- Footer
-st.markdown("---")
-st.caption("Built with LangChain, Streamlit, ChromaDB, and Together AI")
+                # Vector database info
+                st.subheader("🗃️ Vector Database")
+                st.code(f"Path: {vector_store_config.persist_directory}")
+                st.code(f"Collection: {vector_store_config.collection_name}")
+                
+                # Pipeline status
+                st.subheader("🚦 Pipeline Status")
+                if st.session_state.get('pipeline_ready', False):
+                    st.success("✅ Ready")
+                else:
+                    st.error("❌ Not Ready")
+                    
+            except Exception as e:
+                logger.error(f"Error loading configuration for sidebar: {e}")
+                st.error("❌ Configuration Error")
+
+    def render_main_interface(self) -> None:
+        """Render the main query interface."""
+        st.title(APP_TITLE)
+        st.markdown(APP_DESCRIPTION)
+        
+        if not st.session_state.get('pipeline_ready', False):
+            self._render_pipeline_not_ready()
+            return
+        
+        self._render_query_interface()
+
+    def _render_pipeline_not_ready(self) -> None:
+        """Render interface when pipeline is not ready."""
+        st.warning("⚠️ RAG pipeline is not ready.")
+        st.info("💡 Please ensure data_ingestion.py has been run and your API key is set correctly.")
+        
+        # Try to initialize pipeline
+        if st.button("🔄 Try Initialize Pipeline", type="secondary"):
+            with st.spinner("Initializing pipeline..."):
+                st.session_state.rag_pipeline = self.get_rag_pipeline()
+                st.session_state.pipeline_ready = bool(st.session_state.rag_pipeline)
+                st.rerun()
+
+    def _render_query_interface(self) -> None:
+        """Render the main query interface when pipeline is ready."""
+        st.header("💬 Ask a Question")
+        
+        user_query = st.text_area(
+            "Enter your question about Biosynthesis of Amino Acids, Nucleotides, and Related Molecules:",
+            height=100,
+            key="query_input",
+            placeholder="e.g., What causes gout in humans?"
+        )
+
+        if st.button("🔍 Get Answer", type="primary", use_container_width=True):
+            if not user_query.strip():
+                st.warning("⚠️ Please enter a question to get an answer.")
+                return
+                
+            self._process_query(user_query)
+
+    def _process_query(self, user_query: str) -> None:
+        """
+        Process user query and display results.
+        
+        Args:
+            user_query (str): The user's question
+        """
+        logger.info(f"Processing user query: {user_query[:100]}...")
+        
+        with st.spinner("🤔 Thinking..."):
+            try:
+                pipeline_instance = st.session_state.rag_pipeline
+                results = pipeline_instance.query(user_query)
+                
+                self._display_results(results)
+                logger.info("Query processed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error processing query: {e}")
+                st.error(f"❌ Query Processing Error: {e}")
+                st.warning("💡 Please check your API key and ensure the system is properly configured.")
+
+    def _display_results(self, results: Dict[str, Any]) -> None:
+        """
+        Display query results in the UI.
+        
+        Args:
+            results (Dict[str, Any]): Results from the RAG pipeline
+        """
+        # Display answer
+        st.subheader("🤖 Answer:")
+        answer = results.get('result', "I apologize, I couldn't find a relevant answer in the provided context.")
+        st.write(answer)
+        
+        # Display sources
+        source_documents = results.get('source_documents', [])
+        if source_documents:
+            st.subheader("📄 Sources:")
+            self._display_sources(source_documents)
+        else:
+            st.info("ℹ️ No specific sources were retrieved for this query.")
+
+    def _display_sources(self, source_documents: list) -> None:
+        """
+        Display source documents in expandable sections.
+        
+        Args:
+            source_documents (list): List of source documents
+        """
+        for i, doc in enumerate(source_documents):
+            metadata = doc.metadata
+            source_file = metadata.get('source_file', 'N/A')
+            section = metadata.get('Section', 'N/A')
+            chapter_title = metadata.get('chapter_title', 'N/A')
+            chapter_number = metadata.get('chapter_number', 'N/A')
+            
+            # Create expandable section for each source
+            with st.expander(f"📄 Source {i+1}: {source_file} - Chapter {chapter_number}"):
+                st.markdown(f"**Section:** {section}")
+                st.markdown(f"**Chapter:** {chapter_number} - {chapter_title}")
+                st.markdown("**Content:**")
+                st.text_area(
+                    "Source content",
+                    value=doc.page_content,
+                    height=200,
+                    key=f"source_{i}",
+                    label_visibility="collapsed"
+                )
+
+    def _render_footer(self) -> None:
+        """Render the application footer."""
+        st.markdown("---")
+        st.caption("🛠️ Built with LangChain, Streamlit, ChromaDB, and Together AI")
+
+    def _load_pipeline(self) -> None:
+        """Load the RAG pipeline if not already loaded."""
+        if 'rag_pipeline' not in st.session_state or st.session_state.rag_pipeline is None:
+            with st.spinner("🔄 Loading RAG pipeline..."):
+                st.session_state.rag_pipeline = self.get_rag_pipeline()
+                st.session_state.pipeline_ready = bool(st.session_state.rag_pipeline)
+
+    def run(self) -> None:
+        """Run the complete Streamlit application."""
+        try:
+            # Load pipeline
+            self._load_pipeline()
+            
+            # Render UI components
+            self.render_sidebar()
+            self.render_main_interface()
+            self._render_footer()
+            
+        except Exception as e:
+            logger.error(f"Error running application: {e}")
+            st.error(f"❌ Application Error: {e}")
+            st.info("💡 Please refresh the page and try again.")
+
+
+def main():
+    """Main entry point for the Streamlit application."""
+    try:
+        app = BiochemistryRAGApp()
+        app.run()
+    except Exception as e:
+        logger.error(f"Failed to start application: {e}")
+        st.error("❌ Failed to start the application. Please check the logs.")
+
+
+if __name__ == "__main__":
+    main()
