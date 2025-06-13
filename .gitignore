@@ -10,8 +10,8 @@ venv/
 .venv/
 
 # Local ChromaDB persistent storage
-biochem_chroma_db/
-.chroma/ # If Chroma creates a hidden directory
+#biochem_chroma_db/
+#.chroma/ # If Chroma creates a hidden directory
 
 # Logs
 *.log
